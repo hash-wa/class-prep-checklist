@@ -36,6 +36,7 @@ import { offsetDaysToWeeksDays, weeksDaysToOffsetDays, type DueDateAnchor, type 
 import { formatOffsetLabel } from "@/lib/format";
 import { groupBySection, buildReorderBuckets } from "@/lib/sections";
 import { multiContainerCollisionDetection } from "@/lib/dnd";
+import { getSectionColorStyle } from "@/lib/sectionColors";
 import { OffsetInput } from "@/components/OffsetInput";
 import { DragHandle } from "@/components/DragHandle";
 import { SectionHeader } from "@/components/SectionHeader";
@@ -57,6 +58,7 @@ type TemplateItem = {
 
 type TemplateSection = { id: number; title: string; position: number };
 type InsertGapState = { sectionId: number | null; afterId: number | null } | null;
+type SectionInsertState = { afterId: number | null } | null;
 
 export function TemplateEditor({
   sections: initialSections,
@@ -75,7 +77,7 @@ export function TemplateEditor({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<number>>(new Set());
   const [insertGap, setInsertGap] = useState<InsertGapState>(null);
-  const [sectionInsertAfterId, setSectionInsertAfterId] = useState<number | null>(null);
+  const [sectionInsertGap, setSectionInsertGap] = useState<SectionInsertState>(null);
   const [showNewSectionForm, setShowNewSectionForm] = useState(false);
   const [activeItemId, setActiveItemId] = useState<number | null>(null);
 
@@ -273,11 +275,11 @@ export function TemplateEditor({
   // Mirrors handleInsertedItem: the new section always lands at the end server-side, so splice
   // it into the slot the user actually clicked and persist that via the existing section
   // reorder action.
-  function handleInsertedSection(afterSectionId: number, newSectionId: number) {
-    setSectionInsertAfterId(null);
+  function handleInsertedSection(afterSectionId: number | null, newSectionId: number) {
+    setSectionInsertGap(null);
     const ids = sections.map((s) => s.id);
-    const insertIndex = ids.indexOf(afterSectionId);
-    if (insertIndex === -1) return;
+    const insertIndex = afterSectionId === null ? -1 : ids.indexOf(afterSectionId);
+    if (afterSectionId !== null && insertIndex === -1) return;
     const orderedIds = [...ids.slice(0, insertIndex + 1), newSectionId, ...ids.slice(insertIndex + 1)];
     startTransition(() => {
       reorderTemplateSections(orderedIds);
@@ -359,7 +361,17 @@ export function TemplateEditor({
             />
           </SectionDropZone>
 
-          {sections.length > 0 && <div className="h-8" />}
+          {sections.length > 0 && (
+            <SectionInsertGap
+              active={sectionInsertGap?.afterId === null}
+              onOpen={() => setSectionInsertGap({ afterId: null })}
+            >
+              <NewSectionForm
+                onCancel={() => setSectionInsertGap(null)}
+                onCreated={(newId) => handleInsertedSection(null, newId)}
+              />
+            </SectionInsertGap>
+          )}
 
           {groups
             .filter((g) => g.section !== null)
@@ -374,6 +386,7 @@ export function TemplateEditor({
                   title={section.title}
                   count={group.items.length}
                   collapsed={collapsed}
+                  colorIndex={section.id}
                   onToggleCollapsed={() => toggleSectionCollapsed(section.id)}
                   onRename={(title) => renameTemplateSection(section.id, title)}
                   onDelete={() => {
@@ -389,6 +402,7 @@ export function TemplateEditor({
                   <ItemList
                     items={group.items}
                     sectionId={section.id}
+                    sectionColorIndex={section.id}
                     insertGap={insertGap}
                     onToggleInsert={setInsertGap}
                     onInserted={handleInsertedItem}
@@ -404,11 +418,11 @@ export function TemplateEditor({
                   />
                 </SectionBlock>
                 <SectionInsertGap
-                  active={sectionInsertAfterId === section.id}
-                  onOpen={() => setSectionInsertAfterId(section.id)}
+                  active={sectionInsertGap?.afterId === section.id}
+                  onOpen={() => setSectionInsertGap({ afterId: section.id })}
                 >
                   <NewSectionForm
-                    onCancel={() => setSectionInsertAfterId(null)}
+                    onCancel={() => setSectionInsertGap(null)}
                     onCreated={(newId) => handleInsertedSection(section.id, newId)}
                   />
                 </SectionInsertGap>
@@ -490,6 +504,7 @@ function SectionBlock({
   title,
   count,
   collapsed,
+  colorIndex,
   onToggleCollapsed,
   onRename,
   onDelete,
@@ -503,6 +518,7 @@ function SectionBlock({
   title: string;
   count: number;
   collapsed: boolean;
+  colorIndex?: number;
   onToggleCollapsed: () => void;
   onRename: (title: string) => void;
   onDelete: () => void;
@@ -518,6 +534,7 @@ function SectionBlock({
         title={title}
         count={count}
         collapsed={collapsed}
+        colorIndex={colorIndex}
         onToggleCollapsed={onToggleCollapsed}
         onRename={onRename}
         onDelete={onDelete}
@@ -534,6 +551,7 @@ function SectionBlock({
 function ItemList({
   items,
   sectionId,
+  sectionColorIndex,
   insertGap,
   onToggleInsert,
   onInserted,
@@ -549,6 +567,7 @@ function ItemList({
 }: {
   items: TemplateItem[];
   sectionId: number | null;
+  sectionColorIndex?: number;
   insertGap: InsertGapState;
   onToggleInsert: (gap: InsertGapState) => void;
   onInserted: (sectionId: number | null, afterId: number | null, newId: number) => void;
@@ -579,9 +598,15 @@ function ItemList({
     );
   }
 
+  const colorStyle = sectionColorIndex !== undefined ? getSectionColorStyle(sectionColorIndex) : null;
+
   return (
     <SortableContext items={items.map((i) => `item-${i.id}`)} strategy={verticalListSortingStrategy}>
-      <ul className="divide-y divide-black/10 rounded-lg border border-black/10 dark:divide-white/10 dark:border-white/10">
+      <ul
+        className={`divide-y divide-black/10 dark:divide-white/10 ${
+          colorStyle ? `rounded-b-lg border-x border-b ${colorStyle.border}` : "rounded-lg border border-black/10 dark:border-white/10"
+        }`}
+      >
         {items.length === 0 ? (
           isActive(null) ? (
             <li className="px-3 py-2">{renderInsertForm(null)}</li>

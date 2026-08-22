@@ -48,6 +48,7 @@ import {
 import { formatOffsetLabel } from "@/lib/format";
 import { groupBySection, buildReorderBuckets } from "@/lib/sections";
 import { multiContainerCollisionDetection } from "@/lib/dnd";
+import { getSectionColorStyle } from "@/lib/sectionColors";
 import { OffsetInput } from "@/components/OffsetInput";
 import { DragHandle } from "@/components/DragHandle";
 import { DeleteButton } from "@/components/DeleteButton";
@@ -79,6 +80,7 @@ type Task = {
 type CourseSection = { id: number; title: string; position: number };
 type AvailableTemplateItem = { id: number; title: string; offsetDays: number; dueDateAnchor: DueDateAnchor };
 type InsertGapState = { sectionId: number | null; afterId: number | null } | null;
+type SectionInsertState = { afterId: number | null } | null;
 
 export function ChecklistEditor({
   courseId,
@@ -107,7 +109,7 @@ export function ChecklistEditor({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<number>>(new Set());
   const [insertGap, setInsertGap] = useState<InsertGapState>(null);
-  const [sectionInsertAfterId, setSectionInsertAfterId] = useState<number | null>(null);
+  const [sectionInsertGap, setSectionInsertGap] = useState<SectionInsertState>(null);
   const [showDueDateAddForm, setShowDueDateAddForm] = useState(false);
   const [showNewSectionForm, setShowNewSectionForm] = useState(false);
   const { hideNA, setHideNA, hideDone, setHideDone } = useTaskFilters();
@@ -308,11 +310,11 @@ export function ChecklistEditor({
   // Mirrors handleInsertedTask: the new section always lands at the end server-side, so splice
   // it into the slot the user actually clicked and persist that via the existing section
   // reorder action.
-  function handleInsertedSection(afterSectionId: number, newSectionId: number) {
-    setSectionInsertAfterId(null);
+  function handleInsertedSection(afterSectionId: number | null, newSectionId: number) {
+    setSectionInsertGap(null);
     const ids = sections.map((s) => s.id);
-    const insertIndex = ids.indexOf(afterSectionId);
-    if (insertIndex === -1) return;
+    const insertIndex = afterSectionId === null ? -1 : ids.indexOf(afterSectionId);
+    if (afterSectionId !== null && insertIndex === -1) return;
     const orderedIds = [...ids.slice(0, insertIndex + 1), newSectionId, ...ids.slice(insertIndex + 1)];
     startTransition(() => {
       reorderCourseSections(courseId, orderedIds);
@@ -522,7 +524,22 @@ export function ChecklistEditor({
               />
             </SectionDropZone>
 
-            {sections.length > 0 && <div className="h-8" />}
+            {sections.length > 0 && (
+              locked ? (
+                <div className="h-8" />
+              ) : (
+                <SectionInsertGap
+                  active={sectionInsertGap?.afterId === null}
+                  onOpen={() => setSectionInsertGap({ afterId: null })}
+                >
+                  <NewSectionForm
+                    courseId={courseId}
+                    onCancel={() => setSectionInsertGap(null)}
+                    onCreated={(newId) => handleInsertedSection(null, newId)}
+                  />
+                </SectionInsertGap>
+              )
+            )}
 
             {groups
               .filter((g) => g.section !== null)
@@ -537,6 +554,7 @@ export function ChecklistEditor({
                       title={section.title}
                       count={visibleOf(group.items).length}
                       collapsed={collapsed}
+                      colorIndex={section.id}
                       locked={locked}
                       onToggleCollapsed={() => toggleSectionCollapsed(section.id)}
                       onRename={(title) => renameCourseSection(section.id, courseId, title)}
@@ -557,6 +575,7 @@ export function ChecklistEditor({
                         semesterEndDate={semesterEndDate}
                         locked={locked}
                         sectionId={section.id}
+                        sectionColorIndex={section.id}
                         sections={sections}
                         availableTemplateItems={availableTemplateItems}
                         insertGap={insertGap}
@@ -576,12 +595,12 @@ export function ChecklistEditor({
                       <div className="h-8" />
                     ) : (
                       <SectionInsertGap
-                        active={sectionInsertAfterId === section.id}
-                        onOpen={() => setSectionInsertAfterId(section.id)}
+                        active={sectionInsertGap?.afterId === section.id}
+                        onOpen={() => setSectionInsertGap({ afterId: section.id })}
                       >
                         <NewSectionForm
                           courseId={courseId}
-                          onCancel={() => setSectionInsertAfterId(null)}
+                          onCancel={() => setSectionInsertGap(null)}
                           onCreated={(newId) => handleInsertedSection(section.id, newId)}
                         />
                       </SectionInsertGap>
@@ -704,6 +723,7 @@ function SectionBlock({
   title,
   count,
   collapsed,
+  colorIndex,
   locked,
   onToggleCollapsed,
   onRename,
@@ -718,6 +738,7 @@ function SectionBlock({
   title: string;
   count: number;
   collapsed: boolean;
+  colorIndex?: number;
   locked?: boolean;
   onToggleCollapsed: () => void;
   onRename: (title: string) => void;
@@ -734,6 +755,7 @@ function SectionBlock({
         title={title}
         count={count}
         collapsed={collapsed}
+        colorIndex={colorIndex}
         locked={locked}
         onToggleCollapsed={onToggleCollapsed}
         onRename={onRename}
@@ -755,6 +777,7 @@ function TaskList({
   semesterEndDate,
   locked,
   sectionId,
+  sectionColorIndex,
   sections,
   availableTemplateItems,
   insertGap,
@@ -775,6 +798,7 @@ function TaskList({
   semesterEndDate: string | null;
   locked?: boolean;
   sectionId: number | null;
+  sectionColorIndex?: number;
   sections: CourseSection[];
   availableTemplateItems: AvailableTemplateItem[];
   insertGap: InsertGapState;
@@ -808,9 +832,15 @@ function TaskList({
     );
   }
 
+  const colorStyle = sectionColorIndex !== undefined ? getSectionColorStyle(sectionColorIndex) : null;
+
   return (
     <SortableContext items={tasks.map((t) => `task-${t.id}`)} strategy={verticalListSortingStrategy}>
-      <ul className="divide-y divide-black/10 rounded-lg border border-black/10 dark:divide-white/10 dark:border-white/10">
+      <ul
+        className={`divide-y divide-black/10 dark:divide-white/10 ${
+          colorStyle ? `rounded-b-lg border-x border-b ${colorStyle.border}` : "rounded-lg border border-black/10 dark:border-white/10"
+        }`}
+      >
         {tasks.length === 0 ? (
           isActive(null) ? (
             <li className="px-3 py-2">{renderInsertForm(null)}</li>

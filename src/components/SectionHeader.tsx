@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import { ChevronRightIcon, PencilIcon, TrashIcon } from "@/components/icons";
+import { getSectionColorStyle } from "@/lib/sectionColors";
 
 export function SectionHeader({
   title,
   count,
   collapsed,
+  colorIndex = 0,
   locked = false,
   onToggleCollapsed,
   onRename,
@@ -19,6 +21,7 @@ export function SectionHeader({
   title: string;
   count: number;
   collapsed: boolean;
+  colorIndex?: number;
   locked?: boolean;
   onToggleCollapsed: () => void;
   onRename: (title: string) => void;
@@ -30,6 +33,7 @@ export function SectionHeader({
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(title);
+  const { gradient } = getSectionColorStyle(colorIndex);
 
   function handleSave() {
     const trimmed = value.trim();
@@ -43,7 +47,7 @@ export function SectionHeader({
   }
 
   return (
-    <div className="group mb-0.5 flex items-center gap-2 px-1">
+    <div className={`group flex items-center gap-2 rounded-t-lg bg-gradient-to-br ${gradient} px-3 py-2 shadow-sm`}>
       {editing ? (
         <div className="flex flex-1 items-center gap-2">
           <input
@@ -56,9 +60,9 @@ export function SectionHeader({
               }
             }}
             autoFocus
-            className="flex-1 rounded-md border border-black/15 px-2 py-1 text-sm font-semibold dark:border-white/20"
+            className="flex-1 rounded-md border border-white/40 bg-white/95 px-2 py-1 text-sm font-semibold text-black outline-none"
           />
-          <button onClick={handleSave} className="text-xs text-blue-600 hover:underline">
+          <button onClick={handleSave} className="text-xs font-medium text-white hover:underline">
             Save
           </button>
           <button
@@ -66,7 +70,7 @@ export function SectionHeader({
               setValue(title);
               setEditing(false);
             }}
-            className="text-xs text-black/50 hover:text-black dark:text-white/50 dark:hover:text-white"
+            className="text-xs text-white/80 hover:text-white"
           >
             Cancel
           </button>
@@ -77,15 +81,13 @@ export function SectionHeader({
             onClick={onToggleCollapsed}
             aria-label={collapsed ? "Expand section" : "Collapse section"}
             title={collapsed ? "Expand section" : "Collapse section"}
-            className="-ml-0.5 flex items-center gap-1 rounded p-0.5 text-sm font-semibold uppercase tracking-wide text-black/70 hover:bg-black/5 dark:text-white/70 dark:hover:bg-white/10"
+            className="-ml-1 flex items-center gap-1 rounded p-1 text-sm font-semibold uppercase tracking-wide text-white hover:bg-white/15"
           >
-            <span
-              className={`flex-shrink-0 text-black/40 transition-transform dark:text-white/40 ${collapsed ? "" : "rotate-90"}`}
-            >
+            <span className={`flex-shrink-0 text-white/80 transition-transform ${collapsed ? "" : "rotate-90"}`}>
               <ChevronRightIcon />
             </span>
             <h3>
-              {title} <span className="font-normal normal-case text-black/40 dark:text-white/40">({count})</span>
+              {title} <span className="font-normal normal-case text-white/70">({count})</span>
             </h3>
           </button>
           {!locked && (
@@ -94,7 +96,7 @@ export function SectionHeader({
                 onClick={() => setEditing(true)}
                 aria-label="Rename section"
                 title="Rename section"
-                className="rounded p-1 text-black/40 hover:bg-black/5 hover:text-blue-600 dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-blue-400"
+                className="rounded p-1 text-white/80 hover:bg-white/15 hover:text-white"
               >
                 <PencilIcon />
               </button>
@@ -102,7 +104,7 @@ export function SectionHeader({
                 onClick={onDelete}
                 aria-label="Delete section"
                 title="Delete section"
-                className="rounded p-1 text-black/40 hover:bg-black/5 hover:text-red-600 dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-red-400"
+                className="rounded p-1 text-white/80 hover:bg-white/15 hover:text-white"
               >
                 <TrashIcon />
               </button>
@@ -114,7 +116,7 @@ export function SectionHeader({
                 onClick={onMoveUp}
                 disabled={!canMoveUp}
                 aria-label="Move section up"
-                className="rounded px-1 text-black/50 hover:bg-black/5 hover:text-black disabled:opacity-30 disabled:hover:bg-transparent dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white"
+                className="rounded px-1 text-white/70 hover:bg-white/15 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent"
               >
                 &#9650;
               </button>
@@ -122,7 +124,7 @@ export function SectionHeader({
                 onClick={onMoveDown}
                 disabled={!canMoveDown}
                 aria-label="Move section down"
-                className="rounded px-1 text-black/50 hover:bg-black/5 hover:text-black disabled:opacity-30 disabled:hover:bg-transparent dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white"
+                className="rounded px-1 text-white/70 hover:bg-white/15 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent"
               >
                 &#9660;
               </button>
