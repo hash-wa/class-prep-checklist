@@ -13,7 +13,7 @@ import {
 import { asc, and, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { listTemplateItems, listTemplateSections, getLatestTemplateUpdatedAt } from "./template";
+import { listTemplateItems, listTemplateSections, getLatestTemplateUpdatedAt, touchTemplateVersion } from "./template";
 import { groupBySection } from "@/lib/sections";
 
 export async function listCoursesForSemester(semesterId: number) {
@@ -176,25 +176,29 @@ export async function syncCourseFromTemplate(courseId: number) {
     if (s.sourceTemplateSectionId !== null) existingSectionByTemplateId.set(s.sourceTemplateSectionId, s);
   }
 
-  const sectionIdMap = new Map<number, number>();
-  for (const ts of templateSectionsList) {
-    const existing = existingSectionByTemplateId.get(ts.id);
-    if (existing) {
-      if (existing.title !== ts.title || existing.position !== ts.position) {
-        await db
-          .update(courseSections)
-          .set({ title: ts.title, position: ts.position })
-          .where(eq(courseSections.id, existing.id));
+  // Each section's work is independent of every other section's, so run them concurrently
+  // rather than one round trip at a time — this loop (and the tasks loop below) sequentially
+  // was the actual reason a real resync took several seconds.
+  const sectionEntries = await Promise.all(
+    templateSectionsList.map(async (ts): Promise<[number, number]> => {
+      const existing = existingSectionByTemplateId.get(ts.id);
+      if (existing) {
+        if (existing.title !== ts.title || existing.position !== ts.position) {
+          await db
+            .update(courseSections)
+            .set({ title: ts.title, position: ts.position })
+            .where(eq(courseSections.id, existing.id));
+        }
+        return [ts.id, existing.id];
       }
-      sectionIdMap.set(ts.id, existing.id);
-    } else {
       const [created] = await db
         .insert(courseSections)
         .values({ courseId, title: ts.title, position: ts.position, sourceTemplateSectionId: ts.id })
         .returning({ id: courseSections.id });
-      sectionIdMap.set(ts.id, created.id);
-    }
-  }
+      return [ts.id, created.id];
+    })
+  );
+  const sectionIdMap = new Map(sectionEntries);
 
   const staleTaskIds = courseTasksList
     .filter((t) => t.sourceTemplateItemId === null || !templateItemIds.has(t.sourceTemplateItemId))
@@ -203,55 +207,64 @@ export async function syncCourseFromTemplate(courseId: number) {
     await db.delete(courseTasks).where(inArray(courseTasks.id, staleTaskIds));
   }
 
-  for (const item of templateItemsList) {
-    const sectionId = item.sectionId === null ? null : sectionIdMap.get(item.sectionId) ?? null;
-    const existingTask = courseTasksList.find((t) => t.sourceTemplateItemId === item.id);
-
-    if (existingTask) {
-      await db
-        .update(courseTasks)
-        .set({
-          title: item.title,
-          description: item.description,
-          offsetDays: item.offsetDays,
-          dueDateAnchor: item.dueDateAnchor,
-          sectionId,
-          position: item.position,
-        })
-        .where(eq(courseTasks.id, existingTask.id));
-
-      const doneByPosition = new Map(existingTask.subItems.map((s) => [s.position, s.done]));
-      await db.delete(courseTaskSubItems).where(eq(courseTaskSubItems.courseTaskId, existingTask.id));
-      if (item.subItems.length > 0) {
-        await db.insert(courseTaskSubItems).values(
-          item.subItems.map((sub, index) => ({
-            courseTaskId: existingTask.id,
-            text: sub.text,
-            position: index,
-            done: doneByPosition.get(index) ?? false,
-          }))
-        );
+  // A single bulk upsert (one round trip for up to however many template items exist) instead
+  // of a per-item update-or-insert loop — that loop, even parallelized, was still bottlenecked
+  // by the connection pool once there were dozens of items, and was the real reason a real
+  // resync took several seconds. onConflictDoUpdate against the (courseId, sourceTemplateItemId)
+  // unique index also keeps this race-safe the same way the old per-item version was.
+  if (templateItemsList.length > 0) {
+    const doneByPositionByTemplateItemId = new Map<number, Map<number, boolean>>();
+    for (const t of courseTasksList) {
+      if (t.sourceTemplateItemId !== null) {
+        doneByPositionByTemplateItemId.set(t.sourceTemplateItemId, new Map(t.subItems.map((s) => [s.position, s.done])));
       }
-    } else {
-      const [created] = await db
-        .insert(courseTasks)
-        .values({
+    }
+
+    const upserted = await db
+      .insert(courseTasks)
+      .values(
+        templateItemsList.map((item) => ({
           courseId,
-          sectionId,
+          sectionId: item.sectionId === null ? null : sectionIdMap.get(item.sectionId) ?? null,
           title: item.title,
           description: item.description,
           offsetDays: item.offsetDays,
           dueDateAnchor: item.dueDateAnchor,
           position: item.position,
           sourceTemplateItemId: item.id,
-        })
-        .returning({ id: courseTasks.id });
+        }))
+      )
+      .onConflictDoUpdate({
+        target: [courseTasks.courseId, courseTasks.sourceTemplateItemId],
+        set: {
+          sectionId: sql`excluded.section_id`,
+          title: sql`excluded.title`,
+          description: sql`excluded.description`,
+          offsetDays: sql`excluded.offset_days`,
+          dueDateAnchor: sql`excluded.due_date_anchor`,
+          position: sql`excluded.position`,
+        },
+      })
+      .returning({ id: courseTasks.id, sourceTemplateItemId: courseTasks.sourceTemplateItemId });
 
-      if (item.subItems.length > 0) {
-        await db.insert(courseTaskSubItems).values(
-          item.subItems.map((sub, index) => ({ courseTaskId: created.id, text: sub.text, position: index }))
-        );
-      }
+    const taskIdByTemplateItemId = new Map(upserted.map((t) => [t.sourceTemplateItemId, t.id]));
+    const allTaskIds = upserted.map((t) => t.id);
+
+    await db.delete(courseTaskSubItems).where(inArray(courseTaskSubItems.courseTaskId, allTaskIds));
+
+    const subItemRows = templateItemsList.flatMap((item) => {
+      const taskId = taskIdByTemplateItemId.get(item.id);
+      if (!taskId) return [];
+      const doneByPosition = doneByPositionByTemplateItemId.get(item.id);
+      return item.subItems.map((sub, index) => ({
+        courseTaskId: taskId,
+        text: sub.text,
+        position: index,
+        done: doneByPosition?.get(index) ?? false,
+      }));
+    });
+    if (subItemRows.length > 0) {
+      await db.insert(courseTaskSubItems).values(subItemRows);
     }
   }
 
@@ -377,6 +390,7 @@ export async function syncTemplateFromCourse(courseId: number) {
   }
 
   await db.update(courses).set({ templateSnapshotVersion: new Date() }).where(eq(courses.id, courseId));
+  await touchTemplateVersion();
 
   revalidatePath("/template");
   revalidatePath(`/courses/${courseId}`);
@@ -446,6 +460,7 @@ export async function mergeCourseAndTemplate(courseId: number) {
   await addAllMissingTemplateItems(courseId);
 
   await db.update(courses).set({ templateSnapshotVersion: new Date() }).where(eq(courses.id, courseId));
+  await touchTemplateVersion();
 
   revalidatePath("/template");
   revalidatePath(`/courses/${courseId}`);
@@ -614,6 +629,10 @@ export async function addAllMissingTemplateItems(courseId: number) {
     toInsert.push({ item, sectionId, position });
   }
 
+  // onConflictDoNothing guards the same race as syncCourseFromTemplate: if a resync links one
+  // of these "missing" items concurrently, skip it here instead of creating a duplicate. Map
+  // results back by template item id rather than array index, since a skipped conflict would
+  // otherwise shift the returned rows out of alignment with toInsert.
   const createdTasks = await db
     .insert(courseTasks)
     .values(
@@ -627,15 +646,20 @@ export async function addAllMissingTemplateItems(courseId: number) {
         sourceTemplateItemId: item.id,
       }))
     )
-    .returning({ id: courseTasks.id });
+    .onConflictDoNothing({ target: [courseTasks.courseId, courseTasks.sourceTemplateItemId] })
+    .returning({ id: courseTasks.id, sourceTemplateItemId: courseTasks.sourceTemplateItemId });
 
-  const subItemRows = toInsert.flatMap(({ item }, i) =>
-    item.subItems.map((sub, subIndex) => ({
-      courseTaskId: createdTasks[i].id,
+  const createdIdByTemplateItemId = new Map(createdTasks.map((t) => [t.sourceTemplateItemId, t.id]));
+
+  const subItemRows = toInsert.flatMap(({ item }) => {
+    const taskId = createdIdByTemplateItemId.get(item.id);
+    if (!taskId) return [];
+    return item.subItems.map((sub, subIndex) => ({
+      courseTaskId: taskId,
       text: sub.text,
       position: subIndex,
-    }))
-  );
+    }));
+  });
   if (subItemRows.length > 0) {
     await db.insert(courseTaskSubItems).values(subItemRows);
   }

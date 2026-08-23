@@ -151,7 +151,19 @@ export async function addTaskFromTemplate(
       position,
       sourceTemplateItemId: item.id,
     })
+    .onConflictDoNothing({ target: [courseTasks.courseId, courseTasks.sourceTemplateItemId] })
     .returning({ id: courseTasks.id });
+
+  // A conflict means this template item was already added to the course (e.g. a double-submit
+  // race, or a concurrent auto-sync) — nothing to insert, just report the existing task back.
+  if (!created) {
+    const existing = await db.query.courseTasks.findFirst({
+      where: and(eq(courseTasks.courseId, courseId), eq(courseTasks.sourceTemplateItemId, item.id)),
+      columns: { id: true },
+    });
+    revalidatePath(`/courses/${courseId}`);
+    return existing!.id;
+  }
 
   if (item.subItems.length > 0) {
     await db.insert(courseTaskSubItems).values(

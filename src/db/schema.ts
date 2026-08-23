@@ -6,8 +6,19 @@ import {
   boolean,
   date,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+
+// Single-row marker touched by every template-mutating action (item/section create, update,
+// delete, reorder — anything). MAX(template_items.updated_at) alone can't detect deletions or
+// reorders (a delete doesn't bump any remaining row's timestamp), which silently let deleted
+// template items stay in synced courses forever. This is the reliable "has anything changed"
+// signal the lazy course auto-sync's staleness check reads instead.
+export const templateMeta = pgTable("template_meta", {
+  id: integer("id").primaryKey(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const templateSections = pgTable("template_sections", {
   id: serial("id").primaryKey(),
@@ -91,27 +102,39 @@ export const courseSections = pgTable("course_sections", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const courseTasks = pgTable("course_tasks", {
-  id: serial("id").primaryKey(),
-  courseId: integer("course_id")
-    .notNull()
-    .references(() => courses.id, { onDelete: "cascade" }),
-  sectionId: integer("section_id").references(() => courseSections.id, {
-    onDelete: "set null",
-  }),
-  title: text("title").notNull(),
-  description: text("description"),
-  offsetDays: integer("offset_days").notNull(),
-  dueDateAnchor: text("due_date_anchor", { enum: ["start", "end"] }).notNull().default("start"),
-  position: integer("position").notNull().default(0),
-  done: boolean("done").notNull().default(false),
-  irrelevant: boolean("irrelevant").notNull().default(false),
-  sourceTemplateItemId: integer("source_template_item_id").references(
-    () => templateItems.id,
-    { onDelete: "set null" }
-  ),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const courseTasks = pgTable(
+  "course_tasks",
+  {
+    id: serial("id").primaryKey(),
+    courseId: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    sectionId: integer("section_id").references(() => courseSections.id, {
+      onDelete: "set null",
+    }),
+    title: text("title").notNull(),
+    description: text("description"),
+    offsetDays: integer("offset_days").notNull(),
+    dueDateAnchor: text("due_date_anchor", { enum: ["start", "end"] }).notNull().default("start"),
+    position: integer("position").notNull().default(0),
+    done: boolean("done").notNull().default(false),
+    irrelevant: boolean("irrelevant").notNull().default(false),
+    sourceTemplateItemId: integer("source_template_item_id").references(
+      () => templateItems.id,
+      { onDelete: "set null" }
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Prevents concurrent/overlapping syncs from ever inserting two course_tasks linked to the
+    // same master-template item for the same course (NULLs, i.e. custom tasks, are unaffected —
+    // Postgres never treats two NULLs as duplicates under a unique index).
+    uniqueIndex("course_tasks_course_source_template_item_unique").on(
+      table.courseId,
+      table.sourceTemplateItemId
+    ),
+  ]
+);
 
 export const courseTaskSubItems = pgTable("course_task_sub_items", {
   id: serial("id").primaryKey(),

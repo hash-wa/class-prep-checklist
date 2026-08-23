@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db";
-import { templateItems, templateSections, templateSubItems } from "@/db/schema";
+import { templateItems, templateSections, templateSubItems, templateMeta } from "@/db/schema";
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
@@ -17,6 +17,21 @@ async function replaceSubItems(templateItemId: number, subItems: string[]) {
       normalized.map((text, index) => ({ templateItemId, text, position: index }))
     );
   }
+}
+
+/**
+ * Touched by every template-mutating action, of any kind. MAX(template_items.updated_at) alone
+ * can't detect deletions or reorders — a delete doesn't bump any remaining row's timestamp, and
+ * neither creating/renaming/reordering a section nor reordering items sets updatedAt on any
+ * template_items row either. That silently let deleted/moved template items stay in synced
+ * courses forever, since the lazy auto-sync's staleness check never saw a change worth acting
+ * on. This single-row marker is the reliable "has anything changed" signal instead.
+ */
+export async function touchTemplateVersion() {
+  await db
+    .insert(templateMeta)
+    .values({ id: 1, updatedAt: new Date() })
+    .onConflictDoUpdate({ target: templateMeta.id, set: { updatedAt: new Date() } });
 }
 
 export async function listTemplateItems() {
@@ -44,6 +59,7 @@ export async function createTemplateSection(title: string) {
     .insert(templateSections)
     .values({ title: trimmed, position: maxPosition + 1 })
     .returning({ id: templateSections.id });
+  await touchTemplateVersion();
   revalidatePath("/template");
   return created.id;
 }
@@ -53,11 +69,13 @@ export async function renameTemplateSection(id: number, title: string) {
   if (!trimmed) throw new Error("Section title is required.");
 
   await db.update(templateSections).set({ title: trimmed }).where(eq(templateSections.id, id));
+  await touchTemplateVersion();
   revalidatePath("/template");
 }
 
 export async function deleteTemplateSection(id: number) {
   await db.delete(templateSections).where(eq(templateSections.id, id));
+  await touchTemplateVersion();
   revalidatePath("/template");
 }
 
@@ -70,6 +88,7 @@ export async function reorderTemplateSections(orderedIds: number[]) {
     )
   );
 
+  await touchTemplateVersion();
   revalidatePath("/template");
 }
 
@@ -108,6 +127,7 @@ export async function createTemplateItem(input: {
 
   await replaceSubItems(created.id, input.subItems ?? []);
 
+  await touchTemplateVersion();
   revalidatePath("/template");
   return created.id;
 }
@@ -140,11 +160,13 @@ export async function updateTemplateItem(
 
   await replaceSubItems(id, input.subItems ?? []);
 
+  await touchTemplateVersion();
   revalidatePath("/template");
 }
 
 export async function deleteTemplateItem(id: number) {
   await db.delete(templateItems).where(eq(templateItems.id, id));
+  await touchTemplateVersion();
   revalidatePath("/template");
 }
 
@@ -162,6 +184,7 @@ export async function reorderTemplateItems(
   if (updates.length === 0) return;
 
   await Promise.all(updates);
+  await touchTemplateVersion();
   revalidatePath("/template");
 }
 
@@ -190,6 +213,7 @@ export async function moveTemplateItemsToSection(ids: number[], sectionId: numbe
     )
   );
 
+  await touchTemplateVersion();
   revalidatePath("/template");
 }
 
@@ -201,6 +225,7 @@ export async function bulkSetTemplateItemsOffset(ids: number[], offsetDays: numb
     .set({ offsetDays, dueDateAnchor, updatedAt: new Date() })
     .where(inArray(templateItems.id, ids));
 
+  await touchTemplateVersion();
   revalidatePath("/template");
 }
 
@@ -209,13 +234,11 @@ export async function bulkDeleteTemplateItems(ids: number[]) {
 
   await db.delete(templateItems).where(inArray(templateItems.id, ids));
 
+  await touchTemplateVersion();
   revalidatePath("/template");
 }
 
 export async function getLatestTemplateUpdatedAt(): Promise<Date | null> {
-  const rows = await db
-    .select({ latest: sql<string | null>`max(${templateItems.updatedAt})` })
-    .from(templateItems);
-  const value = rows[0]?.latest;
-  return value ? new Date(value) : null;
+  const row = await db.query.templateMeta.findFirst({ where: eq(templateMeta.id, 1) });
+  return row?.updatedAt ?? null;
 }
