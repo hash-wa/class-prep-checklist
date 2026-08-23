@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, useTransition } from "react";
+import { Fragment, useMemo, useState, useTransition } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -56,6 +56,7 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { SubItemEditor } from "@/components/SubItemEditor";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { BulkActionsToolbar } from "@/components/BulkActionsToolbar";
+import { PdfExportDialog, type PdfExportSection } from "@/components/PdfExportDialog";
 import { ProgressBar } from "@/components/ProgressBar";
 import { useReportCourseProgress } from "@/components/CourseProgressContext";
 import { useTaskFilters } from "@/components/TaskFilterContext";
@@ -84,6 +85,7 @@ type SectionInsertState = { afterId: number | null } | null;
 
 export function ChecklistEditor({
   courseId,
+  courseName,
   semesterStartDate,
   semesterEndDate,
   sections: initialSections,
@@ -92,6 +94,7 @@ export function ChecklistEditor({
   locked = false,
 }: {
   courseId: number;
+  courseName: string;
   semesterStartDate: string;
   semesterEndDate: string | null;
   sections: CourseSection[];
@@ -127,6 +130,27 @@ export function ChecklistEditor({
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const groups = groupBySection(sections, tasks);
+
+  const pdfSections: PdfExportSection[] = useMemo(
+    () =>
+      groups.map((g) => ({
+        key: g.sectionId === null ? "unsectioned" : String(g.sectionId),
+        title: g.section?.title ?? (g.items.length > 0 ? "Inbox" : null),
+        items: g.items.map((t) => {
+          const dueDate = resolveDueDate(semesterStartDate, semesterEndDate, t.offsetDays, t.dueDateAnchor);
+          return {
+            id: t.id,
+            title: t.title,
+            done: t.done,
+            irrelevant: t.irrelevant,
+            meta: dueDate ? formatDateFriendly(dueDate) : null,
+            description: t.description,
+            subItems: t.subItems.map((s) => ({ text: s.text, done: s.done })),
+          };
+        }),
+      })),
+    [groups, semesterStartDate, semesterEndDate]
+  );
 
   type TaskDragData = { type: "task"; taskId: number; sectionId: number | null };
   type TaskOverData = TaskDragData | { type: "sectionDrop"; sectionId: number | null };
@@ -191,6 +215,14 @@ export function ChecklistEditor({
     const overData = over.data.current as TaskOverData | undefined;
     const destSectionId = overData?.sectionId;
     if (destSectionId === undefined || destSectionId === activeData.sectionId) return;
+
+    // Skip the live cross-section reflow preview when the destination is currently empty:
+    // that would swap its DOM from the empty-state placeholder to a real sortable row
+    // mid-drag, which sends dnd-kit's own SortableContext measurement effect into an
+    // infinite "Maximum update depth exceeded" loop. The move still happens normally on
+    // drop, via the identical computeMovedTasks call in handleDragEnd below.
+    const destGroup = groups.find((g) => g.sectionId === destSectionId);
+    if (destGroup && destGroup.items.length === 0) return;
 
     const result = computeMovedTasks(activeData, overData);
     if (result) setTasks(result.newTasks);
@@ -347,6 +379,9 @@ export function ChecklistEditor({
   const activeDragTask = activeTaskId !== null ? tasks.find((t) => t.id === activeTaskId) ?? null : null;
 
   const toolbarGroups: React.ReactNode[] = [];
+  toolbarGroups.push(
+    <PdfExportDialog key="export-pdf" documentTitle={`${courseName} — Checklist`} sections={pdfSections} />
+  );
   if ((sortMode === "manual" && !locked) || hasNATasks || hasDoneTasks) {
     toolbarGroups.push(
       <div key="select-na" className="flex items-center gap-2">

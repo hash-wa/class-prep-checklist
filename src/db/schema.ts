@@ -13,7 +13,7 @@ export const templateSections = pgTable("template_sections", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
   position: integer("position").notNull().default(0),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const templateItems = pgTable("template_items", {
@@ -26,8 +26,8 @@ export const templateItems = pgTable("template_items", {
   offsetDays: integer("offset_days").notNull(),
   dueDateAnchor: text("due_date_anchor", { enum: ["start", "end"] }).notNull().default("start"),
   position: integer("position").notNull().default(0),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const templateSubItems = pgTable("template_sub_items", {
@@ -63,7 +63,7 @@ export const semesters = pgTable("semesters", {
   name: text("name").notNull(),
   startDate: date("start_date", { mode: "string" }).notNull(),
   endDate: date("end_date", { mode: "string" }),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const courses = pgTable("courses", {
@@ -72,9 +72,9 @@ export const courses = pgTable("courses", {
     .notNull()
     .references(() => semesters.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
-  templateSnapshotVersion: timestamp("template_snapshot_version").notNull(),
+  templateSnapshotVersion: timestamp("template_snapshot_version", { withTimezone: true }).notNull(),
   autoSync: boolean("auto_sync").notNull().default(false),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const courseSections = pgTable("course_sections", {
@@ -88,7 +88,7 @@ export const courseSections = pgTable("course_sections", {
     () => templateSections.id,
     { onDelete: "set null" }
   ),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const courseTasks = pgTable("course_tasks", {
@@ -110,7 +110,7 @@ export const courseTasks = pgTable("course_tasks", {
     () => templateItems.id,
     { onDelete: "set null" }
   ),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const courseTaskSubItems = pgTable("course_task_sub_items", {

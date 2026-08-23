@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, useTransition } from "react";
+import { Fragment, useMemo, useState, useTransition } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -43,6 +43,7 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { SubItemEditor } from "@/components/SubItemEditor";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { BulkActionsToolbar } from "@/components/BulkActionsToolbar";
+import { PdfExportDialog, type PdfExportSection } from "@/components/PdfExportDialog";
 import { PencilIcon, PlusIcon, TrashIcon } from "@/components/icons";
 
 type TemplateItem = {
@@ -92,6 +93,22 @@ export function TemplateEditor({
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const groups = groupBySection(sections, items);
+
+  const pdfSections: PdfExportSection[] = useMemo(
+    () =>
+      groups.map((g) => ({
+        key: g.sectionId === null ? "unsectioned" : String(g.sectionId),
+        title: g.section?.title ?? (g.items.length > 0 ? "Inbox" : null),
+        items: g.items.map((item) => ({
+          id: item.id,
+          title: item.title,
+          meta: formatOffsetLabel(item.offsetDays, item.dueDateAnchor),
+          description: item.description,
+          subItems: item.subItems.map((s) => ({ text: s.text })),
+        })),
+      })),
+    [groups]
+  );
 
   type ItemDragData = { type: "item"; itemId: number; sectionId: number | null };
   type ItemOverData = ItemDragData | { type: "sectionDrop"; sectionId: number | null };
@@ -156,6 +173,14 @@ export function TemplateEditor({
     const overData = over.data.current as ItemOverData | undefined;
     const destSectionId = overData?.sectionId;
     if (destSectionId === undefined || destSectionId === activeData.sectionId) return;
+
+    // Skip the live cross-section reflow preview when the destination is currently empty:
+    // that would swap its DOM from the empty-state placeholder to a real sortable row
+    // mid-drag, which sends dnd-kit's own SortableContext measurement effect into an
+    // infinite "Maximum update depth exceeded" loop. The move still happens normally on
+    // drop, via the identical computeMovedItems call in handleDragEnd below.
+    const destGroup = groups.find((g) => g.sectionId === destSectionId);
+    if (destGroup && destGroup.items.length === 0) return;
 
     const result = computeMovedItems(activeData, overData);
     if (result) setItems(result.newItems);
@@ -292,12 +317,15 @@ export function TemplateEditor({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between text-xs">
-        <button
-          onClick={toggleSelectMode}
-          className={`rounded-md px-2 py-1 ${selectMode ? "bg-blue-600 text-white" : "border border-black/15 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"}`}
-        >
-          {selectMode ? "Cancel selecting" : "Select items"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleSelectMode}
+            className={`rounded-md px-2 py-1 ${selectMode ? "bg-blue-600 text-white" : "border border-black/15 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"}`}
+          >
+            {selectMode ? "Cancel selecting" : "Select items"}
+          </button>
+          <PdfExportDialog documentTitle="Master Template" sections={pdfSections} />
+        </div>
         {itemsWithSubItems.length > 0 && (
           <div className="flex gap-3">
             <button

@@ -80,6 +80,18 @@ export function UnlockIcon() {
   );
 }
 
+export function PrinterIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path
+        d="M6 7.5V3.5h8v4M6 16.5h8v-4H6v4zM4.5 12.5h11a1 1 0 001-1v-4a1 1 0 00-1-1h-11a1 1 0 00-1 1v4a1 1 0 001 1z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function LogoutIcon() {
   return (
     <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5">
