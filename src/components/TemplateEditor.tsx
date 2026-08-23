@@ -44,7 +44,7 @@ import { SubItemEditor } from "@/components/SubItemEditor";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { BulkActionsToolbar } from "@/components/BulkActionsToolbar";
 import { PdfExportDialog, type PdfExportSection } from "@/components/PdfExportDialog";
-import { PencilIcon, PlusIcon, TrashIcon } from "@/components/icons";
+import { FilterIcon, PencilIcon, PlusIcon, TrashIcon } from "@/components/icons";
 
 type TemplateItem = {
   id: number;
@@ -81,6 +81,8 @@ export function TemplateEditor({
   const [sectionInsertGap, setSectionInsertGap] = useState<SectionInsertState>(null);
   const [showNewSectionForm, setShowNewSectionForm] = useState(false);
   const [activeItemId, setActiveItemId] = useState<number | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   if (initialSections !== prevInitialSections) {
     setPrevInitialSections(initialSections);
@@ -314,6 +316,19 @@ export function TemplateEditor({
   const itemsWithSubItems = items.filter((i) => i.subItems.length > 0);
   const activeDragItem = activeItemId !== null ? items.find((i) => i.id === activeItemId) ?? null : null;
 
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  function visibleOf(list: TemplateItem[]) {
+    return normalizedSearch
+      ? list.filter((i) => i.title.toLowerCase().includes(normalizedSearch))
+      : list;
+  }
+  function emptyLabelFor(list: TemplateItem[], defaultLabel: string) {
+    if (normalizedSearch && list.length > 0 && visibleOf(list).length === 0) {
+      return "No items match your search.";
+    }
+    return defaultLabel;
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between text-xs">
@@ -325,6 +340,20 @@ export function TemplateEditor({
             {selectMode ? "Cancel selecting" : "Select items"}
           </button>
           <PdfExportDialog documentTitle="Master Template" sections={pdfSections} />
+          <button
+            onClick={() =>
+              setSearchOpen((prev) => {
+                const next = !prev;
+                if (!next) setSearchQuery("");
+                return next;
+              })
+            }
+            aria-label={searchOpen ? "Close filter" : "Filter items"}
+            title={searchOpen ? "Close filter" : "Filter items"}
+            className={`flex items-center gap-1 rounded-md px-2 py-1 ${searchOpen ? "bg-blue-600 text-white" : "border border-black/15 text-black/60 hover:bg-black/5 dark:border-white/20 dark:text-white/60 dark:hover:bg-white/10"}`}
+          >
+            <FilterIcon /> Filter
+          </button>
         </div>
         {itemsWithSubItems.length > 0 && (
           <div className="flex gap-3">
@@ -340,6 +369,19 @@ export function TemplateEditor({
           </div>
         )}
       </div>
+
+      {searchOpen && (
+        <div className="sticky top-0 z-20 bg-white/95 py-2 backdrop-blur-sm dark:bg-neutral-950/95">
+          <input
+            autoFocus
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Filter items…"
+            className="w-full rounded-md border border-black/15 px-3 py-1.5 text-sm outline-none focus:border-blue-500 dark:border-white/20 dark:bg-neutral-900"
+          />
+        </div>
+      )}
 
       {selectMode && (
         <BulkActionsToolbar
@@ -367,12 +409,12 @@ export function TemplateEditor({
               <h3 className="text-sm font-semibold uppercase tracking-wide text-black/70 dark:text-white/70">
                 Inbox{" "}
                 <span className="font-normal normal-case text-black/40 dark:text-white/40">
-                  ({groups.find((g) => g.sectionId === null)?.items.length ?? 0})
+                  ({visibleOf(groups.find((g) => g.sectionId === null)?.items ?? []).length})
                 </span>
               </h3>
             </div>
             <ItemList
-              items={groups.find((g) => g.sectionId === null)?.items ?? []}
+              items={visibleOf(groups.find((g) => g.sectionId === null)?.items ?? [])}
               sectionId={null}
               insertGap={insertGap}
               onToggleInsert={setInsertGap}
@@ -385,7 +427,7 @@ export function TemplateEditor({
               selectedIds={selectedIds}
               onToggleSelected={toggleSelected}
               sections={sections}
-              emptyLabel="Inbox is empty."
+              emptyLabel={emptyLabelFor(groups.find((g) => g.sectionId === null)?.items ?? [], "Inbox is empty.")}
             />
           </SectionDropZone>
 
@@ -412,7 +454,7 @@ export function TemplateEditor({
                 <SectionBlock
                   sectionId={section.id}
                   title={section.title}
-                  count={group.items.length}
+                  count={visibleOf(group.items).length}
                   collapsed={collapsed}
                   colorIndex={section.id}
                   onToggleCollapsed={() => toggleSectionCollapsed(section.id)}
@@ -428,7 +470,7 @@ export function TemplateEditor({
                   canMoveDown={sectionIndex < sections.length - 1}
                 >
                   <ItemList
-                    items={group.items}
+                    items={visibleOf(group.items)}
                     sectionId={section.id}
                     sectionColorIndex={section.id}
                     insertGap={insertGap}
@@ -442,7 +484,7 @@ export function TemplateEditor({
                     selectedIds={selectedIds}
                     onToggleSelected={toggleSelected}
                     sections={sections}
-                    emptyLabel="No items in this section yet."
+                    emptyLabel={emptyLabelFor(group.items, "No items in this section yet.")}
                   />
                 </SectionBlock>
                 <SectionInsertGap

@@ -60,7 +60,7 @@ import { PdfExportDialog, type PdfExportSection } from "@/components/PdfExportDi
 import { ProgressBar } from "@/components/ProgressBar";
 import { useReportCourseProgress } from "@/components/CourseProgressContext";
 import { useTaskFilters } from "@/components/TaskFilterContext";
-import { PencilIcon, PlusIcon } from "@/components/icons";
+import { FilterIcon, PencilIcon, PlusIcon } from "@/components/icons";
 
 type SubItem = { id: number; text: string; position: number; done: boolean };
 
@@ -117,6 +117,9 @@ export function ChecklistEditor({
   const [showNewSectionForm, setShowNewSectionForm] = useState(false);
   const { hideNA, setHideNA, hideDone, setHideDone } = useTaskFilters();
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [prevCourseId, setPrevCourseId] = useState(courseId);
   const [, startTransition] = useTransition();
 
   if (initialSections !== prevInitialSections) {
@@ -126,6 +129,11 @@ export function ChecklistEditor({
   if (initialTasks !== prevInitialTasks) {
     setPrevInitialTasks(initialTasks);
     setTasks(initialTasks);
+  }
+  if (courseId !== prevCourseId) {
+    setPrevCourseId(courseId);
+    setSearchOpen(false);
+    setSearchQuery("");
   }
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -360,11 +368,21 @@ export function ChecklistEditor({
   const hasNATasks = tasks.some((t) => t.irrelevant);
   const hasDoneTasks = tasks.some((t) => t.done);
 
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+
   function visibleOf(items: Task[]) {
-    return items.filter((t) => (!hideNA || !t.irrelevant) && (!hideDone || !t.done));
+    return items.filter(
+      (t) =>
+        (!hideNA || !t.irrelevant) &&
+        (!hideDone || !t.done) &&
+        (!normalizedSearch || t.title.toLowerCase().includes(normalizedSearch))
+    );
   }
 
   function emptyLabelFor(items: Task[], defaultLabel: string) {
+    if (normalizedSearch && items.length > 0 && visibleOf(items).length === 0) {
+      return "No tasks match your search.";
+    }
     if ((hideNA || hideDone) && items.length > 0 && visibleOf(items).length === 0) {
       return "All tasks here are hidden (done/N/A).";
     }
@@ -438,6 +456,20 @@ export function ChecklistEditor({
       <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
         <div className="flex flex-wrap items-center gap-3">{toolbarItems}</div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() =>
+              setSearchOpen((prev) => {
+                const next = !prev;
+                if (!next) setSearchQuery("");
+                return next;
+              })
+            }
+            aria-label={searchOpen ? "Close filter" : "Filter tasks"}
+            title={searchOpen ? "Close filter" : "Filter tasks"}
+            className={`flex items-center gap-1 rounded-md px-2 py-1 ${searchOpen ? "bg-blue-600 text-white" : "border border-black/15 text-black/60 hover:bg-black/5 dark:border-white/20 dark:text-white/60 dark:hover:bg-white/10"}`}
+          >
+            <FilterIcon /> Filter
+          </button>
           <span className="text-black/50 dark:text-white/50">Sort:</span>
           <button
             onClick={() => setSortMode("manual")}
@@ -457,6 +489,19 @@ export function ChecklistEditor({
           </button>
         </div>
       </div>
+
+      {searchOpen && (
+        <div className="sticky top-0 z-20 bg-white/95 py-2 backdrop-blur-sm dark:bg-neutral-950/95">
+          <input
+            autoFocus
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Filter tasks…"
+            className="w-full rounded-md border border-black/15 px-3 py-1.5 text-sm outline-none focus:border-blue-500 dark:border-white/20 dark:bg-neutral-900"
+          />
+        </div>
+      )}
 
       {sortMode === "manual" && selectMode && !locked && (
         <BulkActionsToolbar

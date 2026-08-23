@@ -6,6 +6,14 @@ export function PencilIcon() {
   );
 }
 
+export function FilterIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M3 4h14l-5.5 6.5V16l-3 1.5v-7L3 4z" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function PlusIcon() {
   return (
     <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5">
