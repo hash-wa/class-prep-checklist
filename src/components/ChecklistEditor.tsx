@@ -767,11 +767,22 @@ function DueDateBadge({
 }
 
 function SectionDropZone({ sectionId, children }: { sectionId: number | null; children: React.ReactNode }) {
-  const { setNodeRef } = useDroppable({
+  const { setNodeRef, isOver } = useDroppable({
     id: `section-drop-${sectionId ?? "none"}`,
     data: { type: "sectionDrop", sectionId },
   });
-  return <div ref={setNodeRef}>{children}</div>;
+  return (
+    <div
+      ref={setNodeRef}
+      className={`rounded-lg transition-[outline-color,background-color] ${
+        isOver
+          ? "bg-blue-50/60 outline-2 outline-dashed outline-blue-500 outline-offset-4 dark:bg-blue-950/30"
+          : "outline-2 outline-dashed outline-transparent outline-offset-4"
+      }`}
+    >
+      {children}
+    </div>
+  );
 }
 
 /** Same idea as the task-row InsertGap, but sized for the section-level whitespace: hovering
@@ -907,12 +918,20 @@ function TaskList({
   }
 
   function renderInsertForm(afterId: number | null) {
+    // Default the new task's due date to whichever existing task it'll land next to, so
+    // adding several related tasks in the same spot doesn't require resetting the offset
+    // back from the fixed "1w before start" default every time.
+    const referenceTask = afterId !== null ? tasks.find((t) => t.id === afterId) : tasks[0];
+    const defaultOffset = referenceTask
+      ? offsetDaysToWeeksDays(referenceTask.offsetDays, referenceTask.dueDateAnchor)
+      : undefined;
     return (
       <AddTaskForm
         courseId={courseId}
         sections={sections}
         availableTemplateItems={availableTemplateItems}
         fixedSectionId={sectionId}
+        defaultOffset={defaultOffset}
         onCancel={() => onToggleInsert(null)}
         onCreated={(newId) => onInserted(sectionId, afterId, newId)}
       />
@@ -1317,6 +1336,7 @@ function AddTaskForm({
   sections,
   availableTemplateItems,
   fixedSectionId,
+  defaultOffset,
   onCancel,
   onCreated,
 }: {
@@ -1324,6 +1344,7 @@ function AddTaskForm({
   sections: CourseSection[];
   availableTemplateItems: AvailableTemplateItem[];
   fixedSectionId?: number | null;
+  defaultOffset?: WeeksDaysOffset;
   onCancel?: () => void;
   onCreated?: (id: number) => void;
 }) {
@@ -1339,7 +1360,9 @@ function AddTaskForm({
   const [subItems, setSubItems] = useState<string[]>([]);
   const [formSession, setFormSession] = useState(0);
   const [sectionId, setSectionId] = useState<number | null>(hasFixedSection ? fixedSectionId : null);
-  const [offset, setOffset] = useState<WeeksDaysOffset>({ weeks: 1, days: 0, direction: "before", anchor: "start" });
+  const [offset, setOffset] = useState<WeeksDaysOffset>(
+    defaultOffset ?? { weeks: 1, days: 0, direction: "before", anchor: "start" }
+  );
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {

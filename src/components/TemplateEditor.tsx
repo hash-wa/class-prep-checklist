@@ -528,11 +528,22 @@ export function TemplateEditor({
 }
 
 function SectionDropZone({ sectionId, children }: { sectionId: number | null; children: React.ReactNode }) {
-  const { setNodeRef } = useDroppable({
+  const { setNodeRef, isOver } = useDroppable({
     id: `section-drop-${sectionId ?? "none"}`,
     data: { type: "sectionDrop", sectionId },
   });
-  return <div ref={setNodeRef}>{children}</div>;
+  return (
+    <div
+      ref={setNodeRef}
+      className={`rounded-lg transition-[outline-color,background-color] ${
+        isOver
+          ? "bg-blue-50/60 outline-2 outline-dashed outline-blue-500 outline-offset-4 dark:bg-blue-950/30"
+          : "outline-2 outline-dashed outline-transparent outline-offset-4"
+      }`}
+    >
+      {children}
+    </div>
+  );
 }
 
 /** Same idea as the item-row InsertGap, but sized for the section-level whitespace: hovering
@@ -664,10 +675,18 @@ function ItemList({
   }
 
   function renderInsertForm(afterId: number | null) {
+    // Default the new item's due date to whichever existing item it'll land next to, so
+    // adding several related items in the same spot doesn't require resetting the offset
+    // back from the fixed default every time.
+    const referenceItem = afterId !== null ? items.find((i) => i.id === afterId) : items[0];
+    const defaultOffset = referenceItem
+      ? offsetDaysToWeeksDays(referenceItem.offsetDays, referenceItem.dueDateAnchor)
+      : undefined;
     return (
       <NewItemForm
         sections={sections}
         fixedSectionId={sectionId}
+        defaultOffset={defaultOffset}
         onCancel={() => onToggleInsert(null)}
         onCreated={(newId) => onInserted(sectionId, afterId, newId)}
       />
@@ -1013,14 +1032,18 @@ function NewSectionForm({
   );
 }
 
+const FALLBACK_ITEM_OFFSET: WeeksDaysOffset = { weeks: 2, days: 0, direction: "before", anchor: "start" };
+
 function NewItemForm({
   sections,
   fixedSectionId,
+  defaultOffset,
   onCancel,
   onCreated,
 }: {
   sections: TemplateSection[];
   fixedSectionId?: number | null;
+  defaultOffset?: WeeksDaysOffset;
   onCancel?: () => void;
   onCreated?: (id: number) => void;
 }) {
@@ -1030,7 +1053,7 @@ function NewItemForm({
   const [subItems, setSubItems] = useState<string[]>([]);
   const [formSession, setFormSession] = useState(0);
   const [sectionId, setSectionId] = useState<number | null>(hasFixedSection ? fixedSectionId : null);
-  const [offset, setOffset] = useState<WeeksDaysOffset>({ weeks: 2, days: 0, direction: "before", anchor: "start" });
+  const [offset, setOffset] = useState<WeeksDaysOffset>(defaultOffset ?? FALLBACK_ITEM_OFFSET);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -1051,7 +1074,7 @@ function NewItemForm({
     setSubItems([]);
     setFormSession((s) => s + 1);
     if (!hasFixedSection) setSectionId(null);
-    setOffset({ weeks: 2, days: 0, direction: "before", anchor: "start" });
+    setOffset(defaultOffset ?? FALLBACK_ITEM_OFFSET);
     setSubmitting(false);
   }
 
