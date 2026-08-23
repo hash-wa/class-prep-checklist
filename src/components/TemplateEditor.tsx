@@ -44,6 +44,7 @@ import { SubItemEditor } from "@/components/SubItemEditor";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { BulkActionsToolbar } from "@/components/BulkActionsToolbar";
 import { PdfExportDialog, type PdfExportSection } from "@/components/PdfExportDialog";
+import { useReportTemplateItemCount } from "@/components/TemplateItemCountContext";
 import { FilterIcon, PencilIcon, PlusIcon, TrashIcon } from "@/components/icons";
 
 type TemplateItem = {
@@ -92,6 +93,7 @@ export function TemplateEditor({
     setPrevInitialItems(initialItems);
     setItems(initialItems);
   }
+  useReportTemplateItemCount(items.length);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const groups = groupBySection(sections, items);

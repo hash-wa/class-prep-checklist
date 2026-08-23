@@ -9,7 +9,12 @@ export default async function TemplatePage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Master Template</h1>
+        <h1 className="flex items-baseline gap-2 text-2xl font-semibold tracking-tight">
+          Master Template
+          <span className="text-sm font-normal text-black/40 dark:text-white/40">
+            {items.length} {items.length === 1 ? "item" : "items"}
+          </span>
+        </h1>
         <p className="text-sm text-black/60 dark:text-white/60">
           This is the reusable checklist applied whenever you add a new course. Editing it
           only affects courses created afterward &mdash; existing courses show a note when

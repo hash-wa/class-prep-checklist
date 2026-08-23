@@ -242,3 +242,8 @@ export async function getLatestTemplateUpdatedAt(): Promise<Date | null> {
   const row = await db.query.templateMeta.findFirst({ where: eq(templateMeta.id, 1) });
   return row?.updatedAt ?? null;
 }
+
+export async function getTemplateItemCount(): Promise<number> {
+  const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(templateItems);
+  return Number(count);
+}

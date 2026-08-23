@@ -14,6 +14,7 @@ import {
 import { LogoutButton } from "@/components/LogoutButton";
 import { ProgressBar } from "@/components/ProgressBar";
 import { useCourseProgressMap } from "@/components/CourseProgressContext";
+import { useTemplateItemCount } from "@/components/TemplateItemCountContext";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -82,6 +83,8 @@ function CollapsedSidebar({
   isTemplateActive: boolean;
   onExpand: () => void;
 }) {
+  const templateItemCount = useTemplateItemCount();
+
   return (
     <div className="flex h-screen w-14 flex-shrink-0 flex-col items-center border-r border-black/10 bg-neutral-50/80 py-3 dark:border-white/10 dark:bg-neutral-950">
       <button
@@ -121,8 +124,8 @@ function CollapsedSidebar({
       <div className="flex flex-col items-center gap-1.5 border-t border-black/10 pt-3 dark:border-white/10">
         <Link
           href="/template"
-          title="Master Template"
-          aria-label="Master Template"
+          title={`Master Template (${templateItemCount} ${templateItemCount === 1 ? "item" : "items"})`}
+          aria-label={`Master Template (${templateItemCount} ${templateItemCount === 1 ? "item" : "items"})`}
           className={`flex h-9 w-9 items-center justify-center rounded-md transition-colors ${
             isTemplateActive
               ? "bg-blue-600 text-white"
@@ -162,6 +165,7 @@ export function Sidebar({ semesters }: { semesters: Semester[] }) {
   const pathname = usePathname();
   const router = useRouter();
   const progressOverrides = useCourseProgressMap();
+  const templateItemCount = useTemplateItemCount();
 
   const [collapsed, setCollapsed] = useState(false);
   const [prevPathname, setPrevPathname] = useState(pathname);
@@ -740,6 +744,11 @@ export function Sidebar({ semesters }: { semesters: Semester[] }) {
           }`}
         >
           <BookIcon /> Master Template
+          <span
+            className={`ml-auto text-xs ${pathname === "/template" ? "text-white/70" : "text-black/40 dark:text-white/40"}`}
+          >
+            {templateItemCount} {templateItemCount === 1 ? "item" : "items"}
+          </span>
         </Link>
         <div className="mt-2 px-2.5">
           <LogoutButton />
