@@ -328,6 +328,7 @@ export function TemplateEditor({
     }
     return defaultLabel;
   }
+  const matchCount = visibleOf(items).length;
 
   return (
     <div className="space-y-4">
@@ -372,14 +373,19 @@ export function TemplateEditor({
 
       {searchOpen && (
         <div className="sticky top-0 z-20 bg-white/95 py-2 backdrop-blur-sm dark:bg-neutral-950/95">
-          <input
-            autoFocus
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Filter items…"
-            className="w-full rounded-md border border-black/15 px-3 py-1.5 text-sm outline-none focus:border-blue-500 dark:border-white/20 dark:bg-neutral-900"
-          />
+          <div className="relative">
+            <input
+              autoFocus
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Filter items…"
+              className="w-full rounded-md border border-black/15 py-1.5 pl-3 pr-20 text-sm outline-none focus:border-blue-500 dark:border-white/20 dark:bg-neutral-900"
+            />
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-black/40 dark:text-white/40">
+              {matchCount} match{matchCount === 1 ? "" : "es"}
+            </span>
+          </div>
         </div>
       )}
 
