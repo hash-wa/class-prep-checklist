@@ -53,6 +53,7 @@ import { OffsetInput } from "@/components/OffsetInput";
 import { DragHandle } from "@/components/DragHandle";
 import { DeleteButton } from "@/components/DeleteButton";
 import { SectionHeader } from "@/components/SectionHeader";
+import { DeleteSectionDialog } from "@/components/DeleteSectionDialog";
 import { SubItemEditor } from "@/components/SubItemEditor";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { BulkActionsToolbar } from "@/components/BulkActionsToolbar";
@@ -60,6 +61,7 @@ import { PdfExportDialog, type PdfExportSection } from "@/components/PdfExportDi
 import { ProgressBar } from "@/components/ProgressBar";
 import { useReportCourseProgress } from "@/components/CourseProgressContext";
 import { useTaskFilters } from "@/components/TaskFilterContext";
+import { useUndoToast, UndoToast } from "@/components/UndoToast";
 import { FilterIcon, PencilIcon, PlusIcon } from "@/components/icons";
 
 type SubItem = { id: number; text: string; position: number; done: boolean };
@@ -121,6 +123,8 @@ export function ChecklistEditor({
   const [searchQuery, setSearchQuery] = useState("");
   const [prevCourseId, setPrevCourseId] = useState(courseId);
   const [, startTransition] = useTransition();
+  const { toast, show: showUndo, undo: undoDelete, dismiss: dismissUndo } = useUndoToast();
+  const [sectionDeleteRequest, setSectionDeleteRequest] = useState<CourseSection | null>(null);
 
   if (initialSections !== prevInitialSections) {
     setPrevInitialSections(initialSections);
@@ -258,8 +262,30 @@ export function ChecklistEditor({
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   }
 
-  function removeTask(id: number) {
-    setTasks((prev) => prev.filter((t) => t.id !== id));
+  async function removeTask(task: Task) {
+    // Capture which task (if any) came right before this one in its section, so "Undo" can
+    // reinsert a recreated copy in the same spot via the same create-then-reorder path the
+    // insert-gap flow already uses. Deletion itself still happens immediately — undo recreates
+    // rather than reversing it, so a recreated task's sub-items always start unchecked and it's
+    // no longer linked back to its master-template source, if it had one.
+    const siblingItems = groups.find((g) => g.sectionId === task.sectionId)?.items ?? [];
+    const index = siblingItems.findIndex((t) => t.id === task.id);
+    const afterId = index > 0 ? siblingItems[index - 1].id : null;
+
+    setTasks((prev) => prev.filter((t) => t.id !== task.id));
+    await deleteTask(task.id, courseId);
+
+    showUndo(`"${task.title}" deleted`, async () => {
+      const newId = await addCustomTask(courseId, {
+        title: task.title,
+        sectionId: task.sectionId,
+        subItems: task.subItems.map((s) => s.text),
+        offsetDays: task.offsetDays,
+        dueDateAnchor: task.dueDateAnchor,
+        description: task.description,
+      });
+      handleInsertedTask(task.sectionId, afterId, newId);
+    });
   }
 
   // The newly created task always lands at the end of its section server-side; splice it into
@@ -358,6 +384,62 @@ export function ChecklistEditor({
     const orderedIds = [...ids.slice(0, insertIndex + 1), newSectionId, ...ids.slice(insertIndex + 1)];
     startTransition(() => {
       reorderCourseSections(courseId, orderedIds);
+    });
+  }
+
+  async function removeSection(section: CourseSection) {
+    // Deleting a section unsections its tasks server-side (sectionId set null via FK), it
+    // doesn't delete them — mirror that locally, then "Undo" recreates the section and moves
+    // those same tasks back into it via the same actions the bulk "move to section" flow uses.
+    const sectionIndex = sections.findIndex((s) => s.id === section.id);
+    const afterSectionId = sectionIndex > 0 ? sections[sectionIndex - 1].id : null;
+    const itemIds = (groups.find((g) => g.sectionId === section.id)?.items ?? []).map((t) => t.id);
+
+    setSections((prev) => prev.filter((s) => s.id !== section.id));
+    setTasks((prev) => prev.map((t) => (t.sectionId === section.id ? { ...t, sectionId: null } : t)));
+    await deleteCourseSection(section.id, courseId);
+
+    showUndo(`"${section.title}" section deleted`, async () => {
+      const newSectionId = await createCourseSection(courseId, section.title);
+      handleInsertedSection(afterSectionId, newSectionId);
+      if (itemIds.length > 0) {
+        setTasks((prev) => prev.map((t) => (itemIds.includes(t.id) ? { ...t, sectionId: newSectionId } : t)));
+        await moveTasksToSection(courseId, itemIds, newSectionId);
+      }
+    });
+  }
+
+  async function removeSectionWithItems(section: CourseSection) {
+    // Unlike removeSection, this also deletes every task in it. "Undo" has to fully
+    // recreate both the section and its tasks (their old rows are really gone), rather than
+    // just moving surviving rows back — sequential awaited creates land in the new (empty)
+    // section in the same order, so no extra reorder call is needed.
+    const sectionIndex = sections.findIndex((s) => s.id === section.id);
+    const afterSectionId = sectionIndex > 0 ? sections[sectionIndex - 1].id : null;
+    const items = groups.find((g) => g.sectionId === section.id)?.items ?? [];
+    const itemIds = items.map((t) => t.id);
+
+    setSections((prev) => prev.filter((s) => s.id !== section.id));
+    setTasks((prev) => prev.filter((t) => !itemIds.includes(t.id)));
+    await Promise.all([
+      deleteCourseSection(section.id, courseId),
+      itemIds.length > 0 ? bulkDeleteTasks(courseId, itemIds) : Promise.resolve(),
+    ]);
+
+    const count = items.length;
+    showUndo(`"${section.title}" section and ${count} task${count === 1 ? "" : "s"} deleted`, async () => {
+      const newSectionId = await createCourseSection(courseId, section.title);
+      handleInsertedSection(afterSectionId, newSectionId);
+      for (const task of items) {
+        await addCustomTask(courseId, {
+          title: task.title,
+          sectionId: newSectionId,
+          subItems: task.subItems.map((s) => s.text),
+          offsetDays: task.offsetDays,
+          dueDateAnchor: task.dueDateAnchor,
+          description: task.description,
+        });
+      }
     });
   }
 
@@ -646,9 +728,11 @@ export function ChecklistEditor({
                       onToggleCollapsed={() => toggleSectionCollapsed(section.id)}
                       onRename={(title) => renameCourseSection(section.id, courseId, title)}
                       onDelete={() => {
-                        if (!confirm(`Delete section "${section.title}"? Tasks move to Unsectioned.`)) return;
-                        setSections((prev) => prev.filter((s) => s.id !== section.id));
-                        deleteCourseSection(section.id, courseId);
+                        if (group.items.length > 0) {
+                          setSectionDeleteRequest(section);
+                        } else {
+                          removeSection(section);
+                        }
                       }}
                       onMoveUp={() => moveSection(section.id, "up")}
                       onMoveDown={() => moveSection(section.id, "down")}
@@ -711,6 +795,33 @@ export function ChecklistEditor({
             <PlusIcon /> Add section
           </button>
         )
+      )}
+
+      {toast && (
+        <UndoToast
+          key={toast.id}
+          message={toast.message}
+          durationMs={toast.durationMs}
+          onUndo={undoDelete}
+          onDismiss={dismissUndo}
+        />
+      )}
+
+      {sectionDeleteRequest && (
+        <DeleteSectionDialog
+          sectionTitle={sectionDeleteRequest.title}
+          itemCount={groups.find((g) => g.sectionId === sectionDeleteRequest.id)?.items.length ?? 0}
+          itemNoun="task"
+          onMoveToInbox={() => {
+            removeSection(sectionDeleteRequest);
+            setSectionDeleteRequest(null);
+          }}
+          onDeleteItems={() => {
+            removeSectionWithItems(sectionDeleteRequest);
+            setSectionDeleteRequest(null);
+          }}
+          onCancel={() => setSectionDeleteRequest(null)}
+        />
       )}
     </div>
   );
@@ -903,7 +1014,7 @@ function TaskList({
   onToggleInsert: (gap: InsertGapState) => void;
   onInserted: (sectionId: number | null, afterId: number | null, newId: number) => void;
   onPatch: (id: number, patch: Partial<Task>) => void;
-  onRemove: (id: number) => void;
+  onRemove: (task: Task) => void;
   expandedIds: Set<number>;
   onToggleExpanded: (id: number) => void;
   selectMode: boolean;
@@ -1053,7 +1164,7 @@ function SortableTaskRow({
   draggable: boolean;
   locked?: boolean;
   onPatch: (id: number, patch: Partial<Task>) => void;
-  onRemove: (id: number) => void;
+  onRemove: (task: Task) => void;
   expanded: boolean;
   onToggleExpanded: () => void;
   selectMode?: boolean;
@@ -1126,8 +1237,7 @@ function SortableTaskRow({
   }
 
   async function handleDelete() {
-    onRemove(task.id);
-    await deleteTask(task.id, courseId);
+    onRemove(task);
   }
 
   return (
@@ -1219,7 +1329,7 @@ function SortableTaskRow({
                 >
                   <PencilIcon />
                 </button>
-                <DeleteButton confirmText={`Remove "${task.title}"?`} onDelete={handleDelete} label="Delete task" icon />
+                <DeleteButton onDelete={handleDelete} label="Delete task" icon />
               </div>
             )}
             <div className="ml-auto flex items-center gap-3">

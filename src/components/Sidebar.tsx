@@ -12,6 +12,7 @@ import {
   deleteCourse,
 } from "@/actions/courses";
 import { LogoutButton } from "@/components/LogoutButton";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ProgressBar } from "@/components/ProgressBar";
 import { useCourseProgressMap } from "@/components/CourseProgressContext";
 import { useTemplateItemCount } from "@/components/TemplateItemCountContext";
@@ -193,6 +194,8 @@ export function Sidebar({ semesters }: { semesters: Semester[] }) {
   const [courseError, setCourseError] = useState<string | null>(null);
   const [editingCourseId, setEditingCourseId] = useState<number | null>(null);
   const [editCourseName, setEditCourseName] = useState("");
+  const [deleteCourseRequest, setDeleteCourseRequest] = useState<{ id: number; name: string } | null>(null);
+  const [showDeleteSemesterConfirm, setShowDeleteSemesterConfirm] = useState(false);
 
   // Record wherever the user currently is so signing back in after a sign-out can
   // return them here (sign-out destroys all in-memory state, so this needs localStorage).
@@ -332,8 +335,14 @@ export function Sidebar({ semesters }: { semesters: Semester[] }) {
     }
   }
 
-  async function handleDeleteCourse(id: number, name: string) {
-    if (!confirm(`Delete "${name}" and its checklist?`)) return;
+  function handleDeleteCourse(id: number, name: string) {
+    setDeleteCourseRequest({ id, name });
+  }
+
+  async function confirmDeleteCourse() {
+    if (!deleteCourseRequest) return;
+    const { id } = deleteCourseRequest;
+    setDeleteCourseRequest(null);
     setCourses((prev) => prev.filter((c) => c.id !== id));
     await deleteCourse(id);
     if (pathname === `/courses/${id}`) {
@@ -355,11 +364,16 @@ export function Sidebar({ semesters }: { semesters: Semester[] }) {
     router.refresh();
   }
 
-  async function handleDeleteSemester() {
+  function handleDeleteSemester() {
+    if (selectedSemesterId === null) return;
+    setShowDeleteSemesterConfirm(true);
+  }
+
+  async function confirmDeleteSemester() {
+    setShowDeleteSemesterConfirm(false);
     if (selectedSemesterId === null) return;
     const semester = semesters.find((s) => s.id === selectedSemesterId);
     if (!semester) return;
-    if (!confirm(`Delete "${semester.name}" and all its courses?`)) return;
 
     const deletedId = selectedSemesterId;
     await deleteSemester(deletedId);
@@ -754,6 +768,26 @@ export function Sidebar({ semesters }: { semesters: Semester[] }) {
           <LogoutButton />
         </div>
       </div>
+
+      {deleteCourseRequest && (
+        <ConfirmDialog
+          title={`Delete "${deleteCourseRequest.name}"?`}
+          message="This deletes its checklist too. This cannot be undone."
+          confirmLabel="Delete course"
+          onConfirm={confirmDeleteCourse}
+          onCancel={() => setDeleteCourseRequest(null)}
+        />
+      )}
+
+      {showDeleteSemesterConfirm && (
+        <ConfirmDialog
+          title={`Delete "${semesters.find((s) => s.id === selectedSemesterId)?.name ?? ""}"?`}
+          message="This deletes all its courses too. This cannot be undone."
+          confirmLabel="Delete semester"
+          onConfirm={confirmDeleteSemester}
+          onCancel={() => setShowDeleteSemesterConfirm(false)}
+        />
+      )}
     </div>
   );
 }

@@ -9,11 +9,15 @@ import {
   mergeCourseAndTemplate,
 } from "@/actions/courses";
 import { LockIcon, UnlockIcon } from "@/components/icons";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+
+type SyncDirection = "masterToCourse" | "courseToMaster" | "both";
 
 export function CourseSyncControl({ courseId, autoSync }: { courseId: number; autoSync: boolean }) {
   const router = useRouter();
   const [showOptions, setShowOptions] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
 
   async function handleUnlock() {
     setBusy(true);
@@ -22,15 +26,7 @@ export function CourseSyncControl({ courseId, autoSync }: { courseId: number; au
     setBusy(false);
   }
 
-  async function handleEnable(direction: "masterToCourse" | "courseToMaster" | "both") {
-    if (direction === "courseToMaster") {
-      const confirmed = confirm(
-        "This overwrites the Master Template to match this course's current checklist. " +
-          "It affects every course that uses the template, not just this one. Continue?"
-      );
-      if (!confirmed) return;
-    }
-
+  async function performEnable(direction: SyncDirection) {
     setBusy(true);
     if (direction === "masterToCourse") await syncCourseFromTemplate(courseId);
     else if (direction === "courseToMaster") await syncTemplateFromCourse(courseId);
@@ -39,6 +35,14 @@ export function CourseSyncControl({ courseId, autoSync }: { courseId: number; au
     router.refresh();
     setShowOptions(false);
     setBusy(false);
+  }
+
+  function handleEnable(direction: SyncDirection) {
+    if (direction === "courseToMaster") {
+      setShowOverwriteConfirm(true);
+      return;
+    }
+    performEnable(direction);
   }
 
   if (autoSync) {
@@ -100,6 +104,19 @@ export function CourseSyncControl({ courseId, autoSync }: { courseId: number; au
           </button>
           {busy && <p className="px-2 py-1 text-black/40 dark:text-white/40">Syncing...</p>}
         </div>
+      )}
+
+      {showOverwriteConfirm && (
+        <ConfirmDialog
+          title="Overwrite the Master Template?"
+          message="This overwrites the Master Template to match this course's current checklist. It affects every course that uses the template, not just this one."
+          confirmLabel="Overwrite template"
+          onConfirm={() => {
+            setShowOverwriteConfirm(false);
+            performEnable("courseToMaster");
+          }}
+          onCancel={() => setShowOverwriteConfirm(false)}
+        />
       )}
     </div>
   );

@@ -4,12 +4,10 @@ import { useTransition } from "react";
 import { TrashIcon } from "@/components/icons";
 
 export function DeleteButton({
-  confirmText,
   onDelete,
   label = "Delete",
   icon = false,
 }: {
-  confirmText: string;
   onDelete: () => Promise<void>;
   label?: string;
   icon?: boolean;
@@ -17,7 +15,6 @@ export function DeleteButton({
   const [isPending, startTransition] = useTransition();
 
   function handleClick() {
-    if (!confirm(confirmText)) return;
     startTransition(async () => {
       try {
         await onDelete();

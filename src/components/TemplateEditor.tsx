@@ -40,11 +40,13 @@ import { getSectionColorStyle } from "@/lib/sectionColors";
 import { OffsetInput } from "@/components/OffsetInput";
 import { DragHandle } from "@/components/DragHandle";
 import { SectionHeader } from "@/components/SectionHeader";
+import { DeleteSectionDialog } from "@/components/DeleteSectionDialog";
 import { SubItemEditor } from "@/components/SubItemEditor";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { BulkActionsToolbar } from "@/components/BulkActionsToolbar";
 import { PdfExportDialog, type PdfExportSection } from "@/components/PdfExportDialog";
 import { useReportTemplateItemCount } from "@/components/TemplateItemCountContext";
+import { useUndoToast, UndoToast } from "@/components/UndoToast";
 import { FilterIcon, PencilIcon, PlusIcon, TrashIcon } from "@/components/icons";
 
 type TemplateItem = {
@@ -84,6 +86,8 @@ export function TemplateEditor({
   const [activeItemId, setActiveItemId] = useState<number | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const { toast, show: showUndo, undo: undoDelete, dismiss: dismissUndo } = useUndoToast();
+  const [sectionDeleteRequest, setSectionDeleteRequest] = useState<TemplateSection | null>(null);
 
   if (initialSections !== prevInitialSections) {
     setPrevInitialSections(initialSections);
@@ -212,8 +216,29 @@ export function TemplateEditor({
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
   }
 
-  function removeItem(id: number) {
-    setItems((prev) => prev.filter((i) => i.id !== id));
+  async function removeItem(item: TemplateItem) {
+    // Capture which item (if any) came right before this one in its section, so "Undo" can
+    // reinsert a recreated copy in the same spot via the same create-then-reorder path the
+    // insert-gap flow already uses. Deletion itself still happens immediately — undo recreates
+    // rather than reversing it.
+    const siblingItems = groups.find((g) => g.sectionId === item.sectionId)?.items ?? [];
+    const index = siblingItems.findIndex((i) => i.id === item.id);
+    const afterId = index > 0 ? siblingItems[index - 1].id : null;
+
+    setItems((prev) => prev.filter((i) => i.id !== item.id));
+    await deleteTemplateItem(item.id);
+
+    showUndo(`"${item.title}" deleted`, async () => {
+      const newId = await createTemplateItem({
+        title: item.title,
+        sectionId: item.sectionId,
+        subItems: item.subItems.map((s) => s.text),
+        offsetDays: item.offsetDays,
+        dueDateAnchor: item.dueDateAnchor,
+        description: item.description,
+      });
+      handleInsertedItem(item.sectionId, afterId, newId);
+    });
   }
 
   // The newly created item always lands at the end of its section server-side; splice it into
@@ -312,6 +337,62 @@ export function TemplateEditor({
     const orderedIds = [...ids.slice(0, insertIndex + 1), newSectionId, ...ids.slice(insertIndex + 1)];
     startTransition(() => {
       reorderTemplateSections(orderedIds);
+    });
+  }
+
+  async function removeSection(section: TemplateSection) {
+    // Deleting a section unsections its items server-side (sectionId set null via FK), it
+    // doesn't delete them — mirror that locally, then "Undo" recreates the section and moves
+    // those same items back into it via the same action the bulk "move to section" flow uses.
+    const sectionIndex = sections.findIndex((s) => s.id === section.id);
+    const afterSectionId = sectionIndex > 0 ? sections[sectionIndex - 1].id : null;
+    const itemIds = (groups.find((g) => g.sectionId === section.id)?.items ?? []).map((i) => i.id);
+
+    setSections((prev) => prev.filter((s) => s.id !== section.id));
+    setItems((prev) => prev.map((i) => (i.sectionId === section.id ? { ...i, sectionId: null } : i)));
+    await deleteTemplateSection(section.id);
+
+    showUndo(`"${section.title}" section deleted`, async () => {
+      const newSectionId = await createTemplateSection(section.title);
+      handleInsertedSection(afterSectionId, newSectionId);
+      if (itemIds.length > 0) {
+        setItems((prev) => prev.map((i) => (itemIds.includes(i.id) ? { ...i, sectionId: newSectionId } : i)));
+        await moveTemplateItemsToSection(itemIds, newSectionId);
+      }
+    });
+  }
+
+  async function removeSectionWithItems(section: TemplateSection) {
+    // Unlike removeSection, this also deletes every item in it. "Undo" has to fully
+    // recreate both the section and its items (their old rows are really gone), rather than
+    // just moving surviving rows back — sequential awaited creates land in the new (empty)
+    // section in the same order, so no extra reorder call is needed.
+    const sectionIndex = sections.findIndex((s) => s.id === section.id);
+    const afterSectionId = sectionIndex > 0 ? sections[sectionIndex - 1].id : null;
+    const sectionItems = groups.find((g) => g.sectionId === section.id)?.items ?? [];
+    const itemIds = sectionItems.map((i) => i.id);
+
+    setSections((prev) => prev.filter((s) => s.id !== section.id));
+    setItems((prev) => prev.filter((i) => !itemIds.includes(i.id)));
+    await Promise.all([
+      deleteTemplateSection(section.id),
+      itemIds.length > 0 ? bulkDeleteTemplateItems(itemIds) : Promise.resolve(),
+    ]);
+
+    const count = sectionItems.length;
+    showUndo(`"${section.title}" section and ${count} item${count === 1 ? "" : "s"} deleted`, async () => {
+      const newSectionId = await createTemplateSection(section.title);
+      handleInsertedSection(afterSectionId, newSectionId);
+      for (const item of sectionItems) {
+        await createTemplateItem({
+          title: item.title,
+          sectionId: newSectionId,
+          subItems: item.subItems.map((s) => s.text),
+          offsetDays: item.offsetDays,
+          dueDateAnchor: item.dueDateAnchor,
+          description: item.description,
+        });
+      }
     });
   }
 
@@ -468,9 +549,11 @@ export function TemplateEditor({
                   onToggleCollapsed={() => toggleSectionCollapsed(section.id)}
                   onRename={(title) => renameTemplateSection(section.id, title)}
                   onDelete={() => {
-                    if (!confirm(`Delete section "${section.title}"? Items move to Unsectioned.`)) return;
-                    setSections((prev) => prev.filter((s) => s.id !== section.id));
-                    deleteTemplateSection(section.id);
+                    if (group.items.length > 0) {
+                      setSectionDeleteRequest(section);
+                    } else {
+                      removeSection(section);
+                    }
                   }}
                   onMoveUp={() => moveSection(section.id, "up")}
                   onMoveDown={() => moveSection(section.id, "down")}
@@ -525,6 +608,33 @@ export function TemplateEditor({
       )}
 
       {isPending && <p className="text-xs text-black/40">Saving order...</p>}
+
+      {toast && (
+        <UndoToast
+          key={toast.id}
+          message={toast.message}
+          durationMs={toast.durationMs}
+          onUndo={undoDelete}
+          onDismiss={dismissUndo}
+        />
+      )}
+
+      {sectionDeleteRequest && (
+        <DeleteSectionDialog
+          sectionTitle={sectionDeleteRequest.title}
+          itemCount={groups.find((g) => g.sectionId === sectionDeleteRequest.id)?.items.length ?? 0}
+          itemNoun="item"
+          onMoveToInbox={() => {
+            removeSection(sectionDeleteRequest);
+            setSectionDeleteRequest(null);
+          }}
+          onDeleteItems={() => {
+            removeSectionWithItems(sectionDeleteRequest);
+            setSectionDeleteRequest(null);
+          }}
+          onCancel={() => setSectionDeleteRequest(null)}
+        />
+      )}
     </div>
   );
 }
@@ -661,7 +771,7 @@ function ItemList({
   onToggleInsert: (gap: InsertGapState) => void;
   onInserted: (sectionId: number | null, afterId: number | null, newId: number) => void;
   onPatch: (id: number, patch: Partial<TemplateItem>) => void;
-  onRemove: (id: number) => void;
+  onRemove: (item: TemplateItem) => void;
   expandedIds: Set<number>;
   onToggleExpanded: (id: number) => void;
   selectMode: boolean;
@@ -797,7 +907,7 @@ function SortableTemplateRow({
 }: {
   item: TemplateItem;
   onPatch: (id: number, patch: Partial<TemplateItem>) => void;
-  onRemove: (id: number) => void;
+  onRemove: (item: TemplateItem) => void;
   expanded: boolean;
   onToggleExpanded: () => void;
   selectMode: boolean;
@@ -859,10 +969,8 @@ function SortableTemplateRow({
     });
   }
 
-  async function handleDelete() {
-    if (!confirm(`Remove "${item.title}" from the master template?`)) return;
-    onRemove(item.id);
-    await deleteTemplateItem(item.id);
+  function handleDelete() {
+    onRemove(item);
   }
 
   return (

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { OffsetInput } from "@/components/OffsetInput";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { weeksDaysToOffsetDays, type DueDateAnchor, type WeeksDaysOffset } from "@/lib/dates";
 
 export function BulkActionsToolbar({
@@ -26,6 +27,7 @@ export function BulkActionsToolbar({
   const [offset, setOffset] = useState<WeeksDaysOffset>({ weeks: 1, days: 0, direction: "before", anchor: "start" });
   const [settingOffset, setSettingOffset] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const busy = moving || settingOffset || deleting;
 
   async function handleMove() {
@@ -41,9 +43,13 @@ export function BulkActionsToolbar({
     setSettingOffset(false);
   }
 
-  async function handleDelete() {
+  function handleDelete() {
     if (count === 0) return;
-    if (!confirm(`Delete ${count} selected ${itemLabel}${count === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    setShowDeleteConfirm(true);
+  }
+
+  async function confirmDelete() {
+    setShowDeleteConfirm(false);
     setDeleting(true);
     await onDelete();
     setDeleting(false);
@@ -109,6 +115,16 @@ export function BulkActionsToolbar({
           {deleting ? "Deleting..." : "Delete selected"}
         </button>
       </div>
+
+      {showDeleteConfirm && (
+        <ConfirmDialog
+          title={`Delete ${count} selected ${itemLabel}${count === 1 ? "" : "s"}?`}
+          message="This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={confirmDelete}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
     </div>
   );
 }
