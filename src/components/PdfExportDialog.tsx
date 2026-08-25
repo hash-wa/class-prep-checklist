@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { PrinterIcon } from "@/components/icons";
 import { MarkdownContent } from "@/components/MarkdownContent";
+import { useEscapeKey } from "@/lib/useEscapeKey";
 
 export type PdfExportItem = {
   id: number | string;
@@ -134,6 +135,10 @@ export function PdfExportDialog({
   const [align, setAlign] = useState<Align>("center");
   const [naturalHeight, setNaturalHeight] = useState(0);
   const measureRef = useRef<HTMLDivElement>(null);
+
+  useEscapeKey(() => {
+    if (open) setOpen(false);
+  });
 
   const columnGapPx = Math.max(0, gapAmount) * UNIT_TO_PX[gapUnit];
 

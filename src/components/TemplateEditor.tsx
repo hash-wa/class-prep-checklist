@@ -47,6 +47,9 @@ import { BulkActionsToolbar } from "@/components/BulkActionsToolbar";
 import { PdfExportDialog, type PdfExportSection } from "@/components/PdfExportDialog";
 import { useReportTemplateItemCount } from "@/components/TemplateItemCountContext";
 import { useUndoToast, UndoToast } from "@/components/UndoToast";
+import { ShortcutsHelpDialog } from "@/components/ShortcutsHelpDialog";
+import { useEditorShortcuts } from "@/lib/useEditorShortcuts";
+import { useEscapeKey } from "@/lib/useEscapeKey";
 import { FilterIcon, PencilIcon, PlusIcon, TrashIcon } from "@/components/icons";
 
 type TemplateItem = {
@@ -396,6 +399,29 @@ export function TemplateEditor({
     });
   }
 
+  function openFilter() {
+    setSearchOpen(true);
+  }
+
+  function triggerNewItem() {
+    setInsertGap({ sectionId: null, afterId: null });
+  }
+
+  const { helpOpen, closeHelp } = useEditorShortcuts({
+    canUndo: toast !== null,
+    onUndo: undoDelete,
+    onOpenFilter: openFilter,
+    canAdd: !selectMode,
+    onAdd: triggerNewItem,
+  });
+
+  useEscapeKey(() => {
+    if (searchOpen) {
+      setSearchOpen(false);
+      setSearchQuery("");
+    }
+  });
+
   const itemsWithSubItems = items.filter((i) => i.subItems.length > 0);
   const activeDragItem = activeItemId !== null ? items.find((i) => i.id === activeItemId) ?? null : null;
 
@@ -635,6 +661,8 @@ export function TemplateEditor({
           onCancel={() => setSectionDeleteRequest(null)}
         />
       )}
+
+      {helpOpen && <ShortcutsHelpDialog itemNoun="item" canAdd onClose={closeHelp} />}
     </div>
   );
 }
@@ -995,6 +1023,9 @@ function SortableTemplateRow({
                   if (e.key === "Enter") {
                     e.preventDefault();
                     handleSave();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setEditing(false);
                   }
                 }}
                 className="min-w-[10rem] flex-1 rounded-md border border-black/15 px-2 py-1.5 text-sm dark:border-white/20"
@@ -1120,6 +1151,12 @@ function NewSectionForm({
       <input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          }
+        }}
         placeholder="New section name, e.g. Before semester starts"
         autoFocus
         className="min-w-[12rem] flex-1 rounded-md border border-black/15 px-2 py-1.5 text-sm dark:border-white/20"
@@ -1194,6 +1231,12 @@ function NewItemForm({
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && onCancel) {
+              e.preventDefault();
+              onCancel();
+            }
+          }}
           placeholder="New task title, e.g. Post syllabus to LMS"
           autoFocus={hasFixedSection}
           className="min-w-[12rem] flex-1 rounded-md border border-black/15 px-2 py-1.5 text-sm dark:border-white/20"

@@ -1,5 +1,7 @@
 "use client";
 
+import { useEscapeKey } from "@/lib/useEscapeKey";
+
 export function ConfirmDialog({
   title,
   message,
@@ -17,6 +19,8 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  useEscapeKey(onCancel);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
       <div

@@ -62,6 +62,9 @@ import { ProgressBar } from "@/components/ProgressBar";
 import { useReportCourseProgress } from "@/components/CourseProgressContext";
 import { useTaskFilters } from "@/components/TaskFilterContext";
 import { useUndoToast, UndoToast } from "@/components/UndoToast";
+import { ShortcutsHelpDialog } from "@/components/ShortcutsHelpDialog";
+import { useEditorShortcuts } from "@/lib/useEditorShortcuts";
+import { useEscapeKey } from "@/lib/useEscapeKey";
 import { FilterIcon, PencilIcon, PlusIcon } from "@/components/icons";
 
 type SubItem = { id: number; text: string; position: number; done: boolean };
@@ -443,6 +446,33 @@ export function ChecklistEditor({
     });
   }
 
+  function openFilter() {
+    setSearchOpen(true);
+  }
+
+  function triggerNewTask() {
+    if (sortMode === "dueDate") {
+      setShowDueDateAddForm(true);
+    } else {
+      setInsertGap({ sectionId: null, afterId: null });
+    }
+  }
+
+  const { helpOpen, closeHelp } = useEditorShortcuts({
+    canUndo: toast !== null,
+    onUndo: undoDelete,
+    onOpenFilter: openFilter,
+    canAdd: !locked && !selectMode,
+    onAdd: triggerNewTask,
+  });
+
+  useEscapeKey(() => {
+    if (searchOpen) {
+      setSearchOpen(false);
+      setSearchQuery("");
+    }
+  });
+
   const relevantTasks = tasks.filter((t) => !t.irrelevant);
   const doneCount = relevantTasks.filter((t) => t.done).length;
   useReportCourseProgress(courseId, doneCount, relevantTasks.length);
@@ -823,6 +853,8 @@ export function ChecklistEditor({
           onCancel={() => setSectionDeleteRequest(null)}
         />
       )}
+
+      {helpOpen && <ShortcutsHelpDialog itemNoun="task" canAdd={!locked} onClose={closeHelp} />}
     </div>
   );
 }
@@ -1273,6 +1305,9 @@ function SortableTaskRow({
                   if (e.key === "Enter") {
                     e.preventDefault();
                     handleSave();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setEditing(false);
                   }
                 }}
                 className="min-w-[10rem] flex-1 rounded-md border border-black/15 px-2 py-1.5 text-sm dark:border-white/20"
@@ -1419,6 +1454,12 @@ function NewSectionForm({
       <input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          }
+        }}
         placeholder="New section name, e.g. Week 1"
         autoFocus
         className="min-w-[12rem] flex-1 rounded-md border border-black/15 px-2 py-1.5 text-sm dark:border-white/20"
@@ -1558,6 +1599,12 @@ function AddTaskForm({
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && onCancel) {
+                  e.preventDefault();
+                  onCancel();
+                }
+              }}
               placeholder="Task title"
               autoFocus={hasFixedSection}
               className="min-w-[12rem] flex-1 rounded-md border border-black/15 px-2 py-1.5 text-sm dark:border-white/20"

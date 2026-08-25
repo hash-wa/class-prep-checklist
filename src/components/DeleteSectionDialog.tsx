@@ -1,5 +1,7 @@
 "use client";
 
+import { useEscapeKey } from "@/lib/useEscapeKey";
+
 export function DeleteSectionDialog({
   sectionTitle,
   itemCount,
@@ -15,6 +17,8 @@ export function DeleteSectionDialog({
   onDeleteItems: () => void;
   onCancel: () => void;
 }) {
+  useEscapeKey(onCancel);
+
   const plural = itemCount === 1 ? itemNoun : `${itemNoun}s`;
   const pronoun = itemCount === 1 ? "it" : "them";
 
